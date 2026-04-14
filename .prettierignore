@@ -1,0 +1,10 @@
+*
+!src/
+!scripts/
+!test/
+!.prettierrc
+!eslint.config.js
+!package.json
+!tsconfig.json
+!vitest.config.ts
+!README.md

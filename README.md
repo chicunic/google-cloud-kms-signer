@@ -1,109 +1,87 @@
-# google-cloud-kms-importing
+# google-cloud-kms-signer
 
-## 概述
+Import Ethereum private keys into Google Cloud KMS and sign transactions with them.
 
-根据 Google Cloud 文档[1]的描述，将密钥导入 Google Cloud KMS，主要包括以下步骤。
+## Features
 
-- 格式化密钥
-- 封装
-- 导入
-- 验证
+- Import existing Ethereum private keys (secp256k1) into Google Cloud KMS (HSM-backed)
+- `CloudWallet` — an ethers.js `BaseWallet` implementation backed by KMS
+- Sign messages, typed data (EIP-712), and transactions via KMS
+- CRC32C integrity verification on all KMS sign requests
+- Low-s normalization and v recovery for Ethereum-compatible ECDSA signatures
+- Interactive import script with colored output and progress indicators
 
-## 格式化密钥
+## Prerequisites
 
-这里主要讨论下如何将助记词生成的非对称密钥，格式化成可以导入的格式。
+- Node.js >= 24
+- pnpm
+- Google Cloud project with KMS API enabled
+- Authenticated via `gcloud auth application-default login`
 
-1. 生成助记词
+## Install
 
-   ```
-   candy maple cake sugar pudding cream honey rich smooth crumble sweet treat
-   ```
+```bash
+pnpm install
+```
 
-2. 生成私钥
+## Import a Key
 
-   ```
-   0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3
-   ```
+The interactive import script will auto-detect the GCP project and verify the imported key address:
 
-3. 使用`asn1`将私钥从16进制字符串转换为`pem`格式
+```bash
+pnpm tsx scripts/import.ts
+```
 
-   ```js
-   const asn1 = require('asn1.js');
-   const crypto = require('crypto');
-   
-   const ECPrivateKeyASN = asn1.define('ECPrivateKey', function encode() {
-     this.seq().obj(
-       this.key('version').int(),
-       this.key('privateKey').octstr(),
-       this.key('parameters').explicit(0).objid().optional(),
-       this.key('publicKey').explicit(1).bitstr().optional(),
-     );
-   });
-   
-   const toPEM = (privateKeyHex) => {
-     const ecdh = crypto.createECDH('secp256k1');
-     const keypair = ecdh.setPrivateKey(privateKeyHex, 'hex');
-     const privateKey = keypair.getPrivateKey();
-     const publicKey = keypair.getPublicKey();
-     const privateKeyObject = {
-       version: 1,
-       privateKey,
-       publicKey: { data: publicKey },
-       parameters: [1, 3, 132, 0, 10],
-     };
-     return ECPrivateKeyASN.encode(privateKeyObject, 'pem', { label: 'EC PRIVATE KEY' });
-   };
-   ```
+Required IAM permissions:
 
-   可以得到`pem`格式密钥
+| Permission                          | Purpose             |
+| ----------------------------------- | ------------------- |
+| `cloudkms.keyRings.create`          | Create key ring     |
+| `cloudkms.cryptoKeys.create`        | Create crypto key   |
+| `cloudkms.importJobs.create`        | Create import job   |
+| `cloudkms.cryptoKeyVersions.create` | Import key version  |
+| `cloudkms.cryptoKeys.getPublicKey`  | Verify imported key |
 
-   ```
-   -----BEGIN EC PRIVATE KEY-----
-   MHQCAQEEIMh1CaHAZ7veeL63k+b6dlMLY4KkwCQeXkqewKD0TcDToAcGBSuBBAAK
-   oUQDQgAEr4C5DSUUXaKMWDNZvrR7IXlrL+GiPBUR5EPnpk39sn10NMOA8KpMUA4i
-   CqGp0GhRSx/01QGeYk57oe/oKzQKWQ==
-   -----END EC PRIVATE KEY-----
-   ```
+## API
 
+### `CloudWallet`
 
+| Method                                | Description                                         |
+| ------------------------------------- | --------------------------------------------------- |
+| `constructor(versionName, provider?)` | Create a wallet backed by a KMS key version         |
+| `getAddress()`                        | Derive the Ethereum address from the KMS public key |
+| `signMessage(message)`                | Sign an EIP-191 personal message                    |
+| `signTransaction(tx)`                 | Sign a transaction                                  |
+| `signTypedData(domain, types, value)` | Sign EIP-712 typed data                             |
 
-4. 使用`openssl`命令将私钥从`pem`格式转换为`der`格式
+### `importKey(options)`
 
-   ```bash
-   openssl pkcs8 -topk8 -nocrypt -inform PEM -outform DER \
-       -in /path/to/asymmetric-key-pem \
-       -out /path/to/formatted-key
-   ```
+Import a private key into KMS (HSM protection level). Creates the key ring, crypto key, and import job automatically. Key material is wrapped using CKM_RSA_AES_KEY_WRAP (AES-256-KWP + RSA-OAEP SHA-256).
 
+### `cloudSign(versionName, digest, ethereumAddress)`
 
-## 封装
+Sign a 32-byte digest using KMS with CRC32C integrity verification.
 
-封装的方式共有两种。
+### `cloudPublicKey(versionName)`
 
-### 使用 Google Cloud CLI 自动封装密钥
+Retrieve the uncompressed public key from KMS.
 
-使用 Google Cloud CLI 自动封装密钥需要在本地准备好密钥的源文件，在本地安装 Google Cloud CLI 和 Pyca 加密库。Google Cloud KMS 官方推荐这种封装方法。
+### `privateKeyToDer(privateKeyHex)`
 
-使用`gcloud`命令可以实现自动封装和导入。这时只需要提供未封装的密钥文件。
+Convert an Ethereum private key (hex) to PKCS#8 DER format for KMS import.
 
-### 手动封装密钥
+## Test
 
-在某些情况下，由于合规或者监管要求，可能必须手动封装密钥。这种情况下，需要重新编译 OpenSSL 以添加对“使用填充的 AES 密钥封装”的支持。
+```bash
+pnpm test
+```
 
-## 导入
-
-1. 创建目标密钥环
-2. 创建目标密钥
-3. 创建导入作业
-4. 检查导入作业的状态
-5. 自动封装和导入密钥
-6. 导入手动封装的密钥
-
-## 验证
-
-1. 验证密钥材料是否相同
-2. 验证对 Cloud HSM 密钥的证明
+Integration tests require a `.env` file with `VERSION_NAME` and `PRIVATE_KEY` (see `.env.example`). If not set, integration tests are automatically skipped.
 
 ## References
 
-[1]: https://cloud.google.com/kms/docs/importing-a-key	"将密钥导入到 Cloud KMS 中"
+- [Importing a key into Cloud KMS](https://docs.cloud.google.com/kms/docs/importing-a-key#kms-create-key-for-import-nodejs)
+
+## License
+
+MIT
