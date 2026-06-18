@@ -1,46 +1,57 @@
 {
   "name": "google-cloud-kms-signer",
   "version": "0.1.0",
-  "description": "Import Ethereum private keys into Google Cloud KMS and sign with them",
-  "repository": "git@github.com:chicunic/google-cloud-kms-signer.git",
-  "author": "chicunic",
-  "license": "MIT",
   "private": true,
+  "description": "Import Ethereum private keys into Google Cloud KMS and sign with them",
+  "keywords": [
+    "ethereum",
+    "kms",
+    "google-cloud",
+    "signer",
+    "secp256k1",
+    "ethers",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "chicunic",
+  "repository": "git@github.com:chicunic/google-cloud-kms-signer.git",
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "exports": {
     ".": "./dist/index.js"
   },
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@11.7.0",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "check": "tsc -b && eslint . && prettier --check .",
+    "check": "tsc && eslint . && prettier --check .",
     "fix": "eslint . --fix && prettier --write .",
     "prepare": "husky"
   },
   "dependencies": {
     "@aws-crypto/crc32c": "^5.2.0",
-    "@google-cloud/kms": "^5.4.0",
-    "@peculiar/asn1-ecc": "^2.6.1",
-    "@peculiar/asn1-schema": "^2.6.0",
-    "ethers": "^6.16.0"
+    "@google-cloud/kms": "^5.5.1",
+    "@peculiar/asn1-ecc": "^2.8.0",
+    "@peculiar/asn1-schema": "^2.8.0",
+    "ethers": "^6.17.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.9.3",
+    "@vitest/eslint-plugin": "^1.6.20",
     "chalk": "^5.6.2",
     "dotenv": "^17.4.2",
-    "eslint": "^10.2.0",
+    "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
-    "ora": "^9.3.0",
-    "prettier": "^3.8.2",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.2",
-    "vitest": "^4.1.4"
-  },
-  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
+    "jiti": "^2.7.0",
+    "ora": "^9.4.0",
+    "prettier": "^3.8.4",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^4.1.9"
+  }
 }

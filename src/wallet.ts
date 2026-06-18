@@ -19,8 +19,11 @@ import {
   hashMessage,
   resolveAddress,
   resolveProperties,
-} from 'ethers';
-import { cloudSign, cloudPublicKey } from './sign.js';
+} from "ethers";
+import { cloudPublicKey, cloudSign } from "./sign.js";
+
+// Placeholder key satisfying BaseWallet's constructor; CloudWallet never signs with it locally.
+const PLACEHOLDER_SIGNING_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001";
 
 export class CloudWallet extends BaseWallet {
   readonly versionName: string;
@@ -28,14 +31,13 @@ export class CloudWallet extends BaseWallet {
   public address: string;
 
   constructor(versionName: string, provider?: null | Provider) {
-    const signingKey = new SigningKey('0x0000000000000000000000000000000000000000000000000000000000000001');
-    super(signingKey, provider);
+    super(new SigningKey(PLACEHOLDER_SIGNING_KEY), provider);
     this.versionName = versionName;
-    this.provider = provider || null;
-    this.address = '';
+    this.provider = provider ?? null;
+    this.address = "";
   }
 
-  async getAddress() {
+  async getAddress(): Promise<string> {
     if (!this.address) {
       const publicKey = await cloudPublicKey(this.versionName);
       this.address = computeAddress(publicKey);
@@ -44,12 +46,10 @@ export class CloudWallet extends BaseWallet {
   }
 
   private async sign(digest: BytesLike): Promise<Signature> {
-    assertArgument(dataLength(digest) === 32, 'invalid digest length', 'digest', digest);
+    assertArgument(dataLength(digest) === 32, "invalid digest length", "digest", digest);
 
     const ethereumAddress = await this.getAddress();
-    const sig = await cloudSign(this.versionName, getBytesCopy(digest), ethereumAddress);
-
-    return Signature.from(sig);
+    return cloudSign(this.versionName, getBytesCopy(digest), ethereumAddress);
   }
 
   async signTransaction(tx: TransactionRequest): Promise<string> {
@@ -59,19 +59,12 @@ export class CloudWallet extends BaseWallet {
     });
 
     if (to != null) tx.to = to;
-    if (from != null) tx.from = from;
-
-    if (tx.from != null) {
-      assertArgument(
-        getAddress(<string>tx.from) === this.address,
-        'transaction from address mismatch',
-        'tx.from',
-        tx.from,
-      );
+    if (from != null) {
+      assertArgument(getAddress(from) === this.address, "transaction from address mismatch", "tx.from", from);
       delete tx.from;
     }
 
-    const btx = Transaction.from(<TransactionLike<string>>tx);
+    const btx = Transaction.from(tx as TransactionLike);
     btx.signature = await this.sign(btx.unsignedHash);
 
     return btx.serialized;
@@ -84,26 +77,27 @@ export class CloudWallet extends BaseWallet {
 
   async signTypedData(
     domain: TypedDataDomain,
-    types: Record<string, Array<TypedDataField>>,
-    value: Record<string, any>,
+    types: Record<string, TypedDataField[]>,
+    value: Record<string, unknown>,
   ): Promise<string> {
-    const populated = await TypedDataEncoder.resolveNames(domain, types, value, async (name: string) => {
-      assert(this.provider != null, 'cannot resolve ENS names without a provider', 'UNSUPPORTED_OPERATION', {
-        operation: 'resolveName',
-        info: { name },
-      });
+    const populated: { domain: TypedDataDomain; value: Record<string, unknown> } = await TypedDataEncoder.resolveNames(
+      domain,
+      types,
+      value,
+      async (name: string) => {
+        assert(this.provider != null, "cannot resolve ENS names without a provider", "UNSUPPORTED_OPERATION", {
+          operation: "resolveName",
+          info: { name },
+        });
 
-      const address = await this.provider.resolveName(name);
-      assert(address != null, 'unconfigured ENS name', 'UNCONFIGURED_NAME', {
-        value: name,
-      });
+        const address = await this.provider.resolveName(name);
+        assert(address != null, "unconfigured ENS name", "UNCONFIGURED_NAME", { value: name });
 
-      return address;
-    });
-
-    const signature = await this.sign(
-      TypedDataEncoder.hash(populated.domain as Record<string, any>, types, populated.value as Record<string, any>),
+        return address;
+      },
     );
+
+    const signature = await this.sign(TypedDataEncoder.hash(populated.domain, types, populated.value));
     return signature.serialized;
   }
 }

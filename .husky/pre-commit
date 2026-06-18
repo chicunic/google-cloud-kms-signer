@@ -7,7 +7,7 @@ if ! git diff --quiet; then
   exit 1
 fi
 
-# Run check (eslint + prettier)
+# Run check (tsc + eslint + prettier)
 echo "🔍 Running check..."
 pnpm run check
 

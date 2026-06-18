@@ -1,11 +1,16 @@
-import { Crc32c } from '@aws-crypto/crc32c';
-import { KeyManagementServiceClient } from '@google-cloud/kms';
-import { ECDSASigValue } from '@peculiar/asn1-ecc';
-import { AsnParser } from '@peculiar/asn1-schema';
-import { createPublicKey } from 'crypto';
-import { Signature, recoverAddress, toBeHex } from 'ethers';
+import { Crc32c } from "@aws-crypto/crc32c";
+import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { ECDSASigValue } from "@peculiar/asn1-ecc";
+import { AsnParser } from "@peculiar/asn1-schema";
+import { createPublicKey } from "crypto";
+import { Signature, recoverAddress, toBeHex } from "ethers";
 
-const uint8ArrayToBigInt = (buf: Uint8Array): bigint => BigInt('0x' + Buffer.from(buf).toString('hex'));
+// secp256k1 curve order; signatures with s > N/2 are normalized to the lower half (EIP-2).
+const SECP256K1_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+
+function uint8ArrayToBigInt(buf: Uint8Array): bigint {
+  return BigInt("0x" + Buffer.from(buf).toString("hex"));
+}
 
 const client = new KeyManagementServiceClient();
 
@@ -19,44 +24,42 @@ export async function cloudSign(versionName: string, digest: Uint8Array, ethereu
   });
 
   if (signResponse.name !== versionName) {
-    throw new Error('sign failed');
+    throw new Error(`KMS sign returned unexpected version name: ${signResponse.name ?? "null"}`);
   }
   if (!signResponse.verifiedDigestCrc32c) {
-    throw new Error('sign failed');
+    throw new Error("KMS could not verify the request digest CRC32C");
   }
-  if (
-    new Crc32c().update(signResponse.signature as Uint8Array).digest() !== Number(signResponse.signatureCrc32c?.value)
-  ) {
-    throw new Error('sign failed');
+  const signature = signResponse.signature;
+  if (!(signature instanceof Uint8Array)) {
+    throw new Error("KMS sign response is missing the signature");
+  }
+  if (new Crc32c().update(signature).digest() !== Number(signResponse.signatureCrc32c?.value)) {
+    throw new Error("KMS signature CRC32C mismatch (possible data corruption in transit)");
   }
 
   // Parse DER-encoded ECDSA signature
-  const parsedSignature = AsnParser.parse(signResponse.signature as Buffer, ECDSASigValue);
+  const parsedSignature = AsnParser.parse(Buffer.from(signature), ECDSASigValue);
   const rBigInt = uint8ArrayToBigInt(new Uint8Array(parsedSignature.r));
   let sBigInt = uint8ArrayToBigInt(new Uint8Array(parsedSignature.s));
-  const secp256k1N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
-  if (sBigInt > secp256k1N / 2n) sBigInt = secp256k1N - sBigInt;
+  if (sBigInt > SECP256K1_N / 2n) sBigInt = SECP256K1_N - sBigInt;
 
-  // Recover v
-  const r: string = toBeHex(rBigInt, 32);
-  const s: string = toBeHex(sBigInt, 32);
-  let v = 27;
-  let recovered = recoverAddress(digestBuffer, { r, s, v });
-  if (recovered.toLowerCase() !== ethereumAddress.toLowerCase()) {
-    v = 28;
-    recovered = recoverAddress(digestBuffer, { r, s, v });
+  // Recover the signature's recovery id (v) by trying both candidates against the known address.
+  const r = toBeHex(rBigInt, 32);
+  const s = toBeHex(sBigInt, 32);
+  const target = ethereumAddress.toLowerCase();
+  for (const v of [27, 28]) {
+    if (recoverAddress(digestBuffer, { r, s, v }).toLowerCase() === target) {
+      return Signature.from({ r, s, v });
+    }
   }
-  if (recovered.toLowerCase() !== ethereumAddress.toLowerCase()) {
-    throw new Error('sign failed');
-  }
-  return Signature.from({ r, s, v });
+  throw new Error(`KMS signature does not recover to the expected address ${ethereumAddress}`);
 }
 
 export async function cloudPublicKey(versionName: string): Promise<string> {
   const [publicKey] = await client.getPublicKey({ name: versionName });
-  if (!publicKey || !publicKey.pem) throw new Error('can not find version name');
-  const publicKeyBuffer = createPublicKey({ key: publicKey.pem, format: 'pem' })
-    .export({ type: 'spki', format: 'der' })
+  if (!publicKey.pem) throw new Error(`KMS key version not found or has no public key: ${versionName}`);
+  const publicKeyBuffer = createPublicKey({ key: publicKey.pem, format: "pem" })
+    .export({ type: "spki", format: "der" })
     .subarray(-64);
-  return `0x${Buffer.from(publicKeyBuffer).toString('hex')}`;
+  return `0x${Buffer.from(publicKeyBuffer).toString("hex")}`;
 }

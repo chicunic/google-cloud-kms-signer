@@ -13,24 +13,14 @@ Import Ethereum private keys into Google Cloud KMS and sign transactions with th
 
 ## Prerequisites
 
-- Node.js >= 24
+- Node.js >= 26
 - pnpm
 - Google Cloud project with KMS API enabled
-- Authenticated via `gcloud auth application-default login`
-
-## Install
-
-```bash
-pnpm install
-```
+- Authenticated via Application Default Credentials
 
 ## Import a Key
 
-The interactive import script will auto-detect the GCP project and verify the imported key address:
-
-```bash
-pnpm tsx scripts/import.ts
-```
+Run the interactive import script. It auto-detects the GCP project, validates the location and private key, and verifies the imported key address matches the local one.
 
 Required IAM permissions:
 
@@ -53,30 +43,6 @@ Required IAM permissions:
 | `signMessage(message)`                | Sign an EIP-191 personal message                    |
 | `signTransaction(tx)`                 | Sign a transaction                                  |
 | `signTypedData(domain, types, value)` | Sign EIP-712 typed data                             |
-
-### `importKey(options)`
-
-Import a private key into KMS (HSM protection level). Creates the key ring, crypto key, and import job automatically. Key material is wrapped using CKM_RSA_AES_KEY_WRAP (AES-256-KWP + RSA-OAEP SHA-256).
-
-### `cloudSign(versionName, digest, ethereumAddress)`
-
-Sign a 32-byte digest using KMS with CRC32C integrity verification.
-
-### `cloudPublicKey(versionName)`
-
-Retrieve the uncompressed public key from KMS.
-
-### `privateKeyToDer(privateKeyHex)`
-
-Convert an Ethereum private key (hex) to PKCS#8 DER format for KMS import.
-
-## Test
-
-```bash
-pnpm test
-```
-
-Integration tests require a `.env` file with `VERSION_NAME` and `PRIVATE_KEY` (see `.env.example`). If not set, integration tests are automatically skipped.
 
 ## References
 

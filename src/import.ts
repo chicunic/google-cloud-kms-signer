@@ -1,17 +1,17 @@
-import { KeyManagementServiceClient } from '@google-cloud/kms';
-import { createCipheriv, createECDH, createPublicKey, publicEncrypt, randomBytes, constants } from 'crypto';
+import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { constants, createCipheriv, createECDH, createPublicKey, publicEncrypt, randomBytes } from "crypto";
 
 /**
  * Convert an Ethereum private key (hex) to PKCS#8 DER format for KMS import.
  */
 export function privateKeyToDer(privateKeyHex: string): Buffer {
-  const hex = privateKeyHex.startsWith('0x') ? privateKeyHex.slice(2) : privateKeyHex;
-  const ecdh = createECDH('secp256k1');
-  ecdh.setPrivateKey(Buffer.from(hex, 'hex'));
+  const hex = privateKeyHex.startsWith("0x") ? privateKeyHex.slice(2) : privateKeyHex;
+  const ecdh = createECDH("secp256k1");
+  ecdh.setPrivateKey(Buffer.from(hex, "hex"));
   const publicKey = ecdh.getPublicKey();
 
   // ASN.1 ECPrivateKey (SEC 1) — curve OID omitted since it's in PKCS#8 AlgorithmIdentifier
-  const privateKeyBuf = Buffer.from(hex, 'hex');
+  const privateKeyBuf = Buffer.from(hex, "hex");
   const ecPrivateKeyBody = Buffer.concat([
     Buffer.from([0x02, 0x01, 0x01]), // version 1
     Buffer.from([0x04, 0x20, ...privateKeyBuf]), // private key octet string
@@ -63,16 +63,16 @@ function derLength(length: number): number[] {
  */
 function wrapKeyRsaAes(keyDer: Buffer, wrappingKeyPem: string): Buffer {
   const aesKey = randomBytes(32);
-  const iv = Buffer.from('A65959A6', 'hex');
-  const cipher = createCipheriv('aes256-wrap-pad', aesKey, iv);
+  const iv = Buffer.from("A65959A6", "hex");
+  const cipher = createCipheriv("aes256-wrap-pad", aesKey, iv);
   const wrappedTargetKey = Buffer.concat([cipher.update(keyDer), cipher.final()]);
 
-  const wrappingKey = createPublicKey({ key: wrappingKeyPem, format: 'pem' });
+  const wrappingKey = createPublicKey({ key: wrappingKeyPem, format: "pem" });
   const wrappedAesKey = publicEncrypt(
     {
       key: wrappingKey,
       padding: constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha256',
+      oaepHash: "sha256",
     },
     aesKey,
   );
@@ -104,7 +104,7 @@ export async function importKey(options: ImportKeyOptions): Promise<string> {
   try {
     await client.createKeyRing({ parent: locationPath, keyRingId, keyRing: {} });
   } catch (e: unknown) {
-    if (!(e instanceof Error && 'code' in e && e.code === 6)) throw e; // 6 = ALREADY_EXISTS
+    if (!(e instanceof Error && "code" in e && e.code === 6)) throw e; // 6 = ALREADY_EXISTS
   }
 
   // 2. Create crypto key
@@ -113,17 +113,17 @@ export async function importKey(options: ImportKeyOptions): Promise<string> {
       parent: keyRingPath,
       cryptoKeyId,
       cryptoKey: {
-        purpose: 'ASYMMETRIC_SIGN',
+        purpose: "ASYMMETRIC_SIGN",
         versionTemplate: {
-          algorithm: 'EC_SIGN_SECP256K1_SHA256',
-          protectionLevel: 'HSM',
+          algorithm: "EC_SIGN_SECP256K1_SHA256",
+          protectionLevel: "HSM",
         },
         importOnly: true,
       },
       skipInitialVersionCreation: true,
     });
   } catch (e: unknown) {
-    if (!(e instanceof Error && 'code' in e && e.code === 6)) throw e;
+    if (!(e instanceof Error && "code" in e && e.code === 6)) throw e;
   }
 
   // 3. Create import job
@@ -132,30 +132,35 @@ export async function importKey(options: ImportKeyOptions): Promise<string> {
     parent: keyRingPath,
     importJobId,
     importJob: {
-      importMethod: 'RSA_OAEP_4096_SHA256_AES_256',
-      protectionLevel: 'HSM',
+      importMethod: "RSA_OAEP_4096_SHA256_AES_256",
+      protectionLevel: "HSM",
     },
   });
 
   // 4. Wait for import job to be active
+  const importJobName = importJob.name;
+  if (!importJobName) throw new Error("Import job was created without a name");
   let job = importJob;
-  while (job.state !== 'ACTIVE') {
+  while (job.state !== "ACTIVE") {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    const [refreshed] = await client.getImportJob({ name: job.name! });
+    const [refreshed] = await client.getImportJob({ name: importJobName });
     job = refreshed;
   }
 
   // 5. Wrap key material
+  const wrappingKeyPem = job.publicKey?.pem;
+  if (!wrappingKeyPem) throw new Error("Import job is active but exposes no wrapping public key");
   const keyDer = privateKeyToDer(privateKeyHex);
-  const wrappedKey = wrapKeyRsaAes(keyDer, job.publicKey!.pem!);
+  const wrappedKey = wrapKeyRsaAes(keyDer, wrappingKeyPem);
 
   // 6. Import crypto key version
   const [version] = await client.importCryptoKeyVersion({
     parent: cryptoKeyPath,
-    algorithm: 'EC_SIGN_SECP256K1_SHA256',
-    importJob: job.name!,
+    algorithm: "EC_SIGN_SECP256K1_SHA256",
+    importJob: importJobName,
     wrappedKey,
   });
 
-  return version.name!;
+  if (!version.name) throw new Error("Imported key version was created without a name");
+  return version.name;
 }
