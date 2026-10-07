@@ -2,14 +2,14 @@ import { Crc32c } from "@aws-crypto/crc32c";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import { ECDSASigValue } from "@peculiar/asn1-ecc";
 import { AsnParser } from "@peculiar/asn1-schema";
-import { createPublicKey } from "crypto";
+import { createPublicKey } from "node:crypto";
 import { Signature, recoverAddress, toBeHex } from "ethers";
 
 // secp256k1 curve order; signatures with s > N/2 are normalized to the lower half (EIP-2).
 const SECP256K1_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 
-function uint8ArrayToBigInt(buf: Uint8Array): bigint {
-  return BigInt("0x" + Buffer.from(buf).toString("hex"));
+function derIntegerToBigInt(bytes: ArrayBuffer): bigint {
+  return BigInt(`0x${Buffer.from(bytes).toString("hex")}`);
 }
 
 const client = new KeyManagementServiceClient();
@@ -37,10 +37,9 @@ export async function cloudSign(versionName: string, digest: Uint8Array, ethereu
     throw new Error("KMS signature CRC32C mismatch (possible data corruption in transit)");
   }
 
-  // Parse DER-encoded ECDSA signature
   const parsedSignature = AsnParser.parse(Buffer.from(signature), ECDSASigValue);
-  const rBigInt = uint8ArrayToBigInt(new Uint8Array(parsedSignature.r));
-  let sBigInt = uint8ArrayToBigInt(new Uint8Array(parsedSignature.s));
+  const rBigInt = derIntegerToBigInt(parsedSignature.r);
+  let sBigInt = derIntegerToBigInt(parsedSignature.s);
   if (sBigInt > SECP256K1_N / 2n) sBigInt = SECP256K1_N - sBigInt;
 
   // Recover the signature's recovery id (v) by trying both candidates against the known address.
@@ -61,5 +60,5 @@ export async function cloudPublicKey(versionName: string): Promise<string> {
   const publicKeyBuffer = createPublicKey({ key: publicKey.pem, format: "pem" })
     .export({ type: "spki", format: "der" })
     .subarray(-64);
-  return `0x${Buffer.from(publicKeyBuffer).toString("hex")}`;
+  return `0x${publicKeyBuffer.toString("hex")}`;
 }

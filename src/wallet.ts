@@ -1,15 +1,15 @@
 import {
   BaseWallet,
-  BytesLike,
-  Provider,
-  Signature,
+  type BytesLike,
+  type Provider,
+  type Signature,
   SigningKey,
   Transaction,
-  TransactionLike,
-  TransactionRequest,
-  TypedDataDomain,
+  type TransactionLike,
+  type TransactionRequest,
+  type TypedDataDomain,
   TypedDataEncoder,
-  TypedDataField,
+  type TypedDataField,
   assert,
   assertArgument,
   computeAddress,
@@ -64,10 +64,10 @@ export class CloudWallet extends BaseWallet {
       delete tx.from;
     }
 
-    const btx = Transaction.from(tx as TransactionLike);
-    btx.signature = await this.sign(btx.unsignedHash);
+    const transaction = Transaction.from(tx as TransactionLike);
+    transaction.signature = await this.sign(transaction.unsignedHash);
 
-    return btx.serialized;
+    return transaction.serialized;
   }
 
   async signMessage(message: string | Uint8Array): Promise<string> {

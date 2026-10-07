@@ -22,36 +22,36 @@
   "engines": {
     "node": ">=26"
   },
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@12.9.1+sha512.06b055fff5cd20dc12781de173ced3310ce0951bf2ec620211a16045d5444d5c93a663210764ef29a653a610459ba0368f0e74f84d80c54723cf95aae7bc0d6d",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc6 -p tsconfig.build.json",
     "test": "vitest run",
-    "check": "tsc && eslint . && prettier --check .",
+    "check": "tsc6 && eslint . && prettier --check .",
     "fix": "eslint . --fix && prettier --write .",
     "prepare": "husky"
   },
   "dependencies": {
     "@aws-crypto/crc32c": "^5.2.0",
-    "@google-cloud/kms": "^5.5.1",
-    "@peculiar/asn1-ecc": "^2.8.0",
-    "@peculiar/asn1-schema": "^2.8.0",
+    "@google-cloud/kms": "^6.2.1",
+    "@peculiar/asn1-ecc": "^2.10.0",
+    "@peculiar/asn1-schema": "^2.10.0",
     "ethers": "^6.17.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.9.3",
-    "@vitest/eslint-plugin": "^1.6.20",
-    "chalk": "^5.6.2",
-    "dotenv": "^17.4.2",
-    "eslint": "^10.5.0",
+    "@types/node": "^26.6.4",
+    "@vitest/eslint-plugin": "^1.6.27",
+    "chalk": "^6.0.1",
+    "dotenv": "^18.0.6",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "jiti": "^2.7.0",
-    "ora": "^9.4.0",
-    "prettier": "^3.8.4",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.1",
-    "vitest": "^4.1.11"
+    "ora": "^9.4.1",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
   }
 }

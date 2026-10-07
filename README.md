@@ -1,48 +1,76 @@
 # google-cloud-kms-signer
 
-Import Ethereum private keys into Google Cloud KMS and sign transactions with them.
+Import Ethereum private keys into HSM-backed Google Cloud KMS and sign messages, transactions, and EIP-712 typed data with `CloudWallet`.
 
-## Features
+Signing verifies CRC32C integrity, normalizes ECDSA signatures to low-s, and recovers the Ethereum recovery ID.
 
-- Import existing Ethereum private keys (secp256k1) into Google Cloud KMS (HSM-backed)
-- `CloudWallet` — an ethers.js `BaseWallet` implementation backed by KMS
-- Sign messages, typed data (EIP-712), and transactions via KMS
-- CRC32C integrity verification on all KMS sign requests
-- Low-s normalization and v recovery for Ethereum-compatible ECDSA signatures
-- Interactive import script with colored output and progress indicators
+## Setup
 
-## Prerequisites
+Requires Node.js >= 26, pnpm, and a Google Cloud project with the KMS API enabled.
 
-- Node.js >= 26
-- pnpm
-- Google Cloud project with KMS API enabled
-- Authenticated via Application Default Credentials
+```sh
+pnpm install
+gcloud auth application-default login
+```
+
+The authenticated account needs permissions to list KMS locations, create key rings and keys, create and read import jobs, import key versions, and retrieve public keys.
+Signing also requires permission to use key versions to sign.
+See [Cloud KMS permissions and roles](https://docs.cloud.google.com/kms/docs/reference/permissions-and-roles) for the corresponding IAM permissions.
 
 ## Import a Key
 
-Run the interactive import script. It auto-detects the GCP project, validates the location and private key, and verifies the imported key address matches the local one.
+```sh
+pnpm exec tsx scripts/import.ts
+```
 
-Required IAM permissions:
-
-| Permission                          | Purpose             |
-| ----------------------------------- | ------------------- |
-| `cloudkms.keyRings.create`          | Create key ring     |
-| `cloudkms.cryptoKeys.create`        | Create crypto key   |
-| `cloudkms.importJobs.create`        | Create import job   |
-| `cloudkms.cryptoKeyVersions.create` | Import key version  |
-| `cloudkms.cryptoKeys.getPublicKey`  | Verify imported key |
+The script detects the project from Application Default Credentials, prompts for the location, key ring, key name, and private key, then verifies that the imported key's Ethereum address matches the local address.
+It prints the full key version resource name for use with `CloudWallet`.
 
 ## API
 
-### `CloudWallet`
+Run `pnpm build` to generate `dist/index.js`.
 
-| Method                                | Description                                         |
-| ------------------------------------- | --------------------------------------------------- |
-| `constructor(versionName, provider?)` | Create a wallet backed by a KMS key version         |
-| `getAddress()`                        | Derive the Ethereum address from the KMS public key |
-| `signMessage(message)`                | Sign an EIP-191 personal message                    |
-| `signTransaction(tx)`                 | Sign a transaction                                  |
-| `signTypedData(domain, types, value)` | Sign EIP-712 typed data                             |
+```js
+import { CloudWallet } from "./dist/index.js";
+
+const versionName =
+  "projects/<project>/locations/<location>/keyRings/<keyRing>/cryptoKeys/<key>/cryptoKeyVersions/<version>";
+const wallet = new CloudWallet(versionName);
+
+const address = await wallet.getAddress();
+const signature = await wallet.signMessage("message");
+```
+
+`CloudWallet` extends ethers.js `BaseWallet` and accepts an optional provider for address and ENS resolution.
+
+| Method                                | Description                                     |
+| ------------------------------------- | ----------------------------------------------- |
+| `constructor(versionName, provider?)` | Create a wallet backed by a KMS key version     |
+| `getAddress()`                        | Derive the Ethereum address from the public key |
+| `signMessage(message)`                | Sign an EIP-191 personal message                |
+| `signTransaction(tx)`                 | Sign a transaction                              |
+| `signTypedData(domain, types, value)` | Sign EIP-712 typed data                         |
+
+The module also exports `importKey`, `ImportKeyOptions`, `privateKeyToDer`, `cloudPublicKey`, and `cloudSign` for direct use.
+
+## Development
+
+```sh
+pnpm check
+pnpm build
+pnpm exec vitest run tests/wallet.test.ts
+```
+
+`pnpm check` runs TypeScript 6, ESLint, and Prettier.
+The wallet tests run locally without Google Cloud credentials.
+
+For the KMS comparison tests, copy `.env.example` to `.env`, fill in `VERSION_NAME` and its matching `PRIVATE_KEY`, then run:
+
+```sh
+pnpm exec vitest run tests/cloud.test.ts
+```
+
+`pnpm test` runs both suites; the KMS suite is skipped when either environment variable is missing.
 
 ## References
 

@@ -1,4 +1,4 @@
-import { createInterface } from "readline/promises";
+import { createInterface } from "node:readline/promises";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import chalk from "chalk";
 import { Wallet, computeAddress } from "ethers";
@@ -11,20 +11,18 @@ const rl = createInterface({ input: process.stdin, output: process.stdout });
 async function prompt(question: string, defaultValue?: string): Promise<string> {
   const suffix = defaultValue ? chalk.dim(` [${defaultValue}]`) : "";
   const answer = (await rl.question(`${question}${suffix}: `)).trim();
-  if (answer) return answer;
-  return defaultValue ?? "";
+  return answer || (defaultValue ?? "");
 }
 
-function step(n: number, total: number, message: string) {
+function step(n: number, total: number, message: string): void {
   console.log(chalk.cyan(`\n[${n}/${total}]`) + ` ${message}`);
 }
 
-async function main() {
+async function main(): Promise<void> {
   console.log(chalk.bold("\n🔑 Google Cloud KMS Key Import\n"));
 
   const TOTAL_STEPS = 4;
 
-  // Step 1: Project & location
   step(1, TOTAL_STEPS, "Select project and location");
 
   const client = new KeyManagementServiceClient();
@@ -51,7 +49,6 @@ async function main() {
     );
   }
 
-  // Step 2: Key configuration
   step(2, TOTAL_STEPS, "Configure key");
 
   let keyRingId: string;
@@ -67,7 +64,6 @@ async function main() {
   console.log(`  Protection level: ${chalk.green("HSM")}`);
   console.log(`  Import target:    ${chalk.green(cryptoKeyPath)}`);
 
-  // Step 3: Private key
   step(3, TOTAL_STEPS, "Enter private key");
 
   let privateKeyHex: string;
@@ -96,7 +92,6 @@ async function main() {
 
   rl.close();
 
-  // Step 4: Import
   step(4, TOTAL_STEPS, "Importing key to KMS");
 
   const importSpinner = ora("Creating key ring...").start();
@@ -113,12 +108,11 @@ async function main() {
   const kmsPublicKey = await cloudPublicKey(versionName);
   const kmsAddress = computeAddress(kmsPublicKey);
 
-  if (localWallet.address === kmsAddress) {
-    verifySpinner.succeed(`KMS address: ${chalk.green(kmsAddress)} — addresses match!`);
-  } else {
+  if (localWallet.address !== kmsAddress) {
     verifySpinner.fail(`KMS address: ${chalk.red(kmsAddress)} — address mismatch!`);
     process.exit(1);
   }
+  verifySpinner.succeed(`KMS address: ${chalk.green(kmsAddress)} — addresses match!`);
 
   console.log(chalk.bold.green("\n✅ Import complete.\n"));
 }
