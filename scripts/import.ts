@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import { PassThrough } from "node:stream";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import chalk from "chalk";
 import { Wallet, computeAddress } from "ethers";
@@ -6,12 +7,33 @@ import ora from "ora";
 import { importKey } from "../src/import.js";
 import { cloudPublicKey } from "../src/sign.js";
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+let hideInput = false;
+const output = new PassThrough();
+output.on("data", (chunk: Buffer) => {
+  if (!hideInput) process.stdout.write(chunk);
+});
+
+const rl = createInterface({ input: process.stdin, output, terminal: process.stdin.isTTY, historySize: 0 });
+const inputClosed = new AbortController();
+rl.once("close", () => {
+  inputClosed.abort();
+});
 
 async function prompt(question: string, defaultValue?: string): Promise<string> {
   const suffix = defaultValue ? chalk.dim(` [${defaultValue}]`) : "";
-  const answer = (await rl.question(`${question}${suffix}: `)).trim();
+  const answer = (await rl.question(`${question}${suffix}: `, { signal: inputClosed.signal })).trim();
   return answer || (defaultValue ?? "");
+}
+
+async function promptPrivateKey(): Promise<string> {
+  hideInput = true;
+  process.stdout.write("Private key (hex, e.g. 0xac09...ff80): ");
+  try {
+    return (await rl.question("", { signal: inputClosed.signal })).trim();
+  } finally {
+    hideInput = false;
+    process.stdout.write("\n");
+  }
 }
 
 function step(n: number, total: number, message: string): void {
@@ -30,6 +52,7 @@ async function main(): Promise<void> {
   const confirm = await prompt(`GCP project: ${chalk.green(projectId)}. Continue? (Y/n)`);
   if (confirm && confirm.toLowerCase() !== "y") {
     console.log(chalk.yellow("Aborted. Run: gcloud config set project <PROJECT_ID>"));
+    rl.close();
     process.exit(0);
   }
 
@@ -69,7 +92,7 @@ async function main(): Promise<void> {
   let privateKeyHex: string;
   let localWallet: Wallet;
   for (;;) {
-    privateKeyHex = await prompt("Private key (hex, e.g. 0xac09...ff80)");
+    privateKeyHex = await promptPrivateKey();
     if (!privateKeyHex) {
       console.error(chalk.red("✗ Private key is required."));
       continue;
@@ -87,6 +110,7 @@ async function main(): Promise<void> {
   const confirmImport = await prompt("\nContinue? (Y/n)");
   if (confirmImport && confirmImport.toLowerCase() !== "y") {
     console.log(chalk.yellow("Aborted."));
+    rl.close();
     process.exit(0);
   }
 
@@ -94,7 +118,7 @@ async function main(): Promise<void> {
 
   step(4, TOTAL_STEPS, "Importing key to KMS");
 
-  const importSpinner = ora("Creating key ring...").start();
+  const importSpinner = ora("Importing key and waiting for the KMS version to be enabled...").start();
   const versionName = await importKey({
     projectId,
     locationId,
@@ -118,6 +142,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
+  rl.close();
   console.error(chalk.red(err instanceof Error ? err.message : String(err)));
   process.exit(1);
 });

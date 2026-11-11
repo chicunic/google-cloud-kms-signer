@@ -1,5 +1,18 @@
-import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { KeyManagementServiceClient, protos } from "@google-cloud/kms";
 import { constants, createCipheriv, createECDH, createPublicKey, publicEncrypt, randomBytes } from "node:crypto";
+
+const { ImportJobState } = protos.google.cloud.kms.v1.ImportJob;
+const { CryptoKeyVersionState } = protos.google.cloud.kms.v1.CryptoKeyVersion;
+const POLL_INTERVAL_MS = 1000;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function waitForPoll(deadline: number, name: string): Promise<number> {
+  const delay = Math.max(0, Math.min(POLL_INTERVAL_MS, deadline - performance.now()));
+  await new Promise<void>((resolve) => setTimeout(resolve, delay));
+  const timeout = Math.floor(deadline - performance.now());
+  if (timeout <= 0) throw new Error(`Timed out waiting for KMS resource ${name}`);
+  return timeout;
+}
 
 /** Convert a hex Ethereum private key to PKCS#8 DER for KMS import. */
 export function privateKeyToDer(privateKeyHex: string): Buffer {
@@ -67,7 +80,7 @@ function ignoreAlreadyExists(error: unknown): void {
   throw error;
 }
 
-/** Import an Ethereum private key into Cloud KMS and return its full version resource name. */
+/** Import an Ethereum private key into Cloud KMS and return its full version resource name once enabled. */
 export async function importKey(options: ImportKeyOptions): Promise<string> {
   const { projectId, locationId, keyRingId, cryptoKeyId, privateKeyHex } = options;
   const client = new KeyManagementServiceClient();
@@ -113,11 +126,15 @@ export async function importKey(options: ImportKeyOptions): Promise<string> {
   // KMS generates the wrapping key asynchronously; wait before wrapping the private key.
   const importJobName = importJob.name;
   if (!importJobName) throw new Error("Import job was created without a name");
+  const jobDeadline = performance.now() + POLL_TIMEOUT_MS;
   let job = importJob;
-  while (job.state !== "ACTIVE") {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const [refreshed] = await client.getImportJob({ name: importJobName });
-    job = refreshed;
+  while (job.state === "PENDING_GENERATION" || job.state === ImportJobState.PENDING_GENERATION) {
+    const timeout = await waitForPoll(jobDeadline, importJobName);
+    [job] = await client.getImportJob({ name: importJobName }, { timeout });
+  }
+  if (job.state !== "ACTIVE" && job.state !== ImportJobState.ACTIVE) {
+    const state = typeof job.state === "number" ? ImportJobState[job.state] : job.state;
+    throw new Error(`KMS import job ${importJobName} ended in state ${state ?? "unknown"}`);
   }
 
   const wrappingKeyPem = job.publicKey?.pem;
@@ -125,13 +142,24 @@ export async function importKey(options: ImportKeyOptions): Promise<string> {
   const keyDer = privateKeyToDer(privateKeyHex);
   const wrappedKey = wrapKeyRsaAes(keyDer, wrappingKeyPem);
 
-  const [version] = await client.importCryptoKeyVersion({
+  let [version] = await client.importCryptoKeyVersion({
     parent: cryptoKeyPath,
     algorithm: "EC_SIGN_SECP256K1_SHA256",
     importJob: importJobName,
     wrappedKey,
   });
 
-  if (!version.name) throw new Error("Imported key version was created without a name");
-  return version.name;
+  const versionName = version.name;
+  if (!versionName) throw new Error("Imported key version was created without a name");
+  const versionDeadline = performance.now() + POLL_TIMEOUT_MS;
+  while (version.state === "PENDING_IMPORT" || version.state === CryptoKeyVersionState.PENDING_IMPORT) {
+    const timeout = await waitForPoll(versionDeadline, versionName);
+    [version] = await client.getCryptoKeyVersion({ name: versionName }, { timeout });
+  }
+  if (version.state !== "ENABLED" && version.state !== CryptoKeyVersionState.ENABLED) {
+    const state = typeof version.state === "number" ? CryptoKeyVersionState[version.state] : version.state;
+    const reason = version.importFailureReason ? `: ${version.importFailureReason}` : "";
+    throw new Error(`KMS key version ${versionName} ended in state ${state ?? "unknown"}${reason}`);
+  }
+  return versionName;
 }

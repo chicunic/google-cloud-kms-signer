@@ -1,9 +1,10 @@
 import {
-  BaseWallet,
+  AbstractSigner,
+  type Authorization,
+  type AuthorizationRequest,
   type BytesLike,
   type Provider,
   type Signature,
-  SigningKey,
   Transaction,
   type TransactionLike,
   type TransactionRequest,
@@ -13,36 +14,43 @@ import {
   assert,
   assertArgument,
   computeAddress,
+  copyRequest,
   dataLength,
   getAddress,
+  getBigInt,
   getBytesCopy,
+  hashAuthorization,
   hashMessage,
   resolveAddress,
   resolveProperties,
 } from "ethers";
 import { cloudPublicKey, cloudSign } from "./sign.js";
 
-// Placeholder key satisfying BaseWallet's constructor; CloudWallet never signs with it locally.
-const PLACEHOLDER_SIGNING_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001";
-
-export class CloudWallet extends BaseWallet {
+export class CloudWallet extends AbstractSigner {
   readonly versionName: string;
-  readonly provider: null | Provider;
-  public address: string;
+  #address = "";
 
   constructor(versionName: string, provider?: null | Provider) {
-    super(new SigningKey(PLACEHOLDER_SIGNING_KEY), provider);
+    super(provider);
     this.versionName = versionName;
-    this.provider = provider ?? null;
-    this.address = "";
+  }
+
+  get address(): string {
+    return this.#address;
+  }
+
+  connect(provider: null | Provider): CloudWallet {
+    const wallet = new CloudWallet(this.versionName, provider);
+    wallet.#address = this.#address;
+    return wallet;
   }
 
   async getAddress(): Promise<string> {
-    if (!this.address) {
+    if (!this.#address) {
       const publicKey = await cloudPublicKey(this.versionName);
-      this.address = computeAddress(publicKey);
+      this.#address = computeAddress(publicKey);
     }
-    return this.address;
+    return this.#address;
   }
 
   private async sign(digest: BytesLike): Promise<Signature> {
@@ -52,7 +60,8 @@ export class CloudWallet extends BaseWallet {
     return cloudSign(this.versionName, getBytesCopy(digest), ethereumAddress);
   }
 
-  async signTransaction(tx: TransactionRequest): Promise<string> {
+  async signTransaction(request: TransactionRequest): Promise<string> {
+    const tx = copyRequest(request);
     const { to, from } = await resolveProperties({
       to: tx.to ? resolveAddress(tx.to, this.provider) : undefined,
       from: tx.from ? resolveAddress(tx.from, this.provider) : undefined,
@@ -60,7 +69,8 @@ export class CloudWallet extends BaseWallet {
 
     if (to != null) tx.to = to;
     if (from != null) {
-      assertArgument(getAddress(from) === this.address, "transaction from address mismatch", "tx.from", from);
+      const address = await this.getAddress();
+      assertArgument(getAddress(from) === address, "transaction from address mismatch", "tx.from", from);
       delete tx.from;
     }
 
@@ -73,6 +83,18 @@ export class CloudWallet extends BaseWallet {
   async signMessage(message: string | Uint8Array): Promise<string> {
     const signature = await this.sign(hashMessage(message));
     return signature.serialized;
+  }
+
+  async authorize(request: AuthorizationRequest): Promise<Authorization> {
+    const address = getAddress(await resolveAddress(request.address, this.provider));
+    const populated = await this.populateAuthorization({ ...request, address });
+    const authorization = {
+      address,
+      chainId: getBigInt(populated.chainId ?? 0),
+      nonce: getBigInt(populated.nonce ?? 0),
+    };
+    const signature = await this.sign(hashAuthorization(authorization));
+    return { ...authorization, signature };
   }
 
   async signTypedData(

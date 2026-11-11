@@ -13,7 +13,7 @@ pnpm install
 gcloud auth application-default login
 ```
 
-The authenticated account needs permissions to list KMS locations, create key rings and keys, create and read import jobs, import key versions, and retrieve public keys.
+The authenticated account needs permissions to list KMS locations, create key rings and keys, create and read import jobs, import and read key versions, and retrieve public keys.
 Signing also requires permission to use key versions to sign.
 See [Cloud KMS permissions and roles](https://docs.cloud.google.com/kms/docs/reference/permissions-and-roles) for the corresponding IAM permissions.
 
@@ -23,7 +23,8 @@ See [Cloud KMS permissions and roles](https://docs.cloud.google.com/kms/docs/ref
 pnpm exec tsx scripts/import.ts
 ```
 
-The script detects the project from Application Default Credentials, prompts for the location, key ring, key name, and private key, then verifies that the imported key's Ethereum address matches the local address.
+The script detects the project from Application Default Credentials and prompts for the location, key ring, key name, and private key.
+It hides the private key as you enter it, waits for the KMS key version to be enabled, and verifies that its Ethereum address matches the local address.
 It prints the full key version resource name for use with `CloudWallet`.
 
 ## API
@@ -41,15 +42,18 @@ const address = await wallet.getAddress();
 const signature = await wallet.signMessage("message");
 ```
 
-`CloudWallet` extends ethers.js `BaseWallet` and accepts an optional provider for address and ENS resolution.
+`CloudWallet` extends ethers.js `AbstractSigner` and accepts an optional provider for address and ENS resolution.
+Signing methods are asynchronous.
 
 | Method                                | Description                                     |
 | ------------------------------------- | ----------------------------------------------- |
 | `constructor(versionName, provider?)` | Create a wallet backed by a KMS key version     |
+| `connect(provider)`                   | Return a wallet for the same KMS key version    |
 | `getAddress()`                        | Derive the Ethereum address from the public key |
 | `signMessage(message)`                | Sign an EIP-191 personal message                |
 | `signTransaction(tx)`                 | Sign a transaction                              |
 | `signTypedData(domain, types, value)` | Sign EIP-712 typed data                         |
+| `authorize(request)`                  | Sign an EIP-7702 authorization                  |
 
 The module also exports `importKey`, `ImportKeyOptions`, `privateKeyToDer`, `cloudPublicKey`, and `cloudSign` for direct use.
 
@@ -70,7 +74,8 @@ For the KMS comparison tests, copy `.env.example` to `.env`, fill in `VERSION_NA
 pnpm exec vitest run tests/cloud.test.ts
 ```
 
-`pnpm test` runs both suites; the KMS suite is skipped when either environment variable is missing.
+`pnpm test` also runs the offline tests with a mocked KMS.
+The live KMS suite is skipped when either environment variable is missing.
 
 ## References
 
